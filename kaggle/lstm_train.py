@@ -3,19 +3,18 @@
 Created on Wed Apr 19 14:33:46 2017
 
 @author: hzxieshukun
+参看https://www.kaggle.com/lystdo/quora-question-pairs/lstm-with-word2vec-embeddings
+MAX_NB_WORDS = 200000
+num_lstm = np.random.randint(175, 275)
+num_dense = np.random.randint(100, 150)
+EPOCHS = 200
+BATCH_SIZE = 2048
 """
 
-import os
-import re
 import csv
 import codecs
 import numpy as np
-import pandas as pd
 import time
-
-from nltk.corpus import stopwords
-from nltk.stem import SnowballStemmer
-from string import punctuation
 
 from gensim.models import KeyedVectors
 
@@ -26,6 +25,8 @@ from keras.layers.merge import concatenate
 from keras.models import Model
 from keras.layers.normalization import BatchNormalization
 from keras.callbacks import EarlyStopping, ModelCheckpoint
+
+from util import text_to_wordlist
 
 #import sys
 #reload(sys)
@@ -38,13 +39,20 @@ TRAIN_DATA_FILE = BASE_DIR + 'train.csv'
 TEST_DATA_FILE = BASE_DIR + 'test.csv'
 MAX_SEQUENCE_LENGTH = 30
 MAX_NB_WORDS = 200000
+SET_NB_WORDS = 8000
 EMBEDDING_DIM = 300
 VALIDATION_SPLIT = 0.1
+EPOCHS = 2
+BATCH_SIZE = 2048
 
-num_lstm = np.random.randint(175, 275)
-num_dense = np.random.randint(100,150)
-rate_drop_lstm = 0.15 + np.random.rand() * 0.25
-rate_drop_dense = 0.15 + np.random.rand() * 0.25
+num_lstm = np.random.randint(1, 2)
+num_dense = np.random.randint(1,2)
+rate_drop_lstm = 0
+rate_drop_dense = 0
+#num_lstm = np.random.randint(175, 275)
+#num_dense = np.random.randint(100, 150)
+#rate_drop_lstm = 0.15 + np.random.rand() * 0.25
+#rate_drop_dense = 0.15 + np.random.rand() * 0.25
 
 act = 'relu'
 
@@ -53,58 +61,10 @@ re_weight = True
 
 STAMP = 'lstm_%d_%d_%.2f_%.2f' % (num_lstm, num_dense, rate_drop_lstm, rate_drop_dense)
 
+
+
 ##process texts in datasets
 print('Processing text dataset')
-def text_to_wordlist(text, remove_stopwords = False, stem_words = False):
-    #convert words to lower case and split them
-    text = text.lower().split()
-    
-    if remove_stopwords:
-        stops = set(stopwords.words("english"))
-        text = [w for w in text if not w in stops]
-    
-    text = " ".join(text)
-    
-    ##clean the text
-    text = re.sub(r"[^A-Za-z0-9^,!.\/'+-=]", " ", text)
-    text = re.sub(r"what's", "what is ", text)
-    text = re.sub(r"\'s", " ", text)
-    text = re.sub(r"\'ve", "have ", text)
-    text = re.sub(r"can't", "cannot ", text)
-    text = re.sub(r"n't", " not ", text)
-    text = re.sub(r"i'm", "i am ", text)
-    text = re.sub(r"\'re", " are ", text)
-    text = re.sub(r"\'d", " would ", text)
-    text = re.sub(r"\'ll", " will ", text)
-    text = re.sub(r",", " ", text)
-    text = re.sub(r"\.", " ", text)
-    text = re.sub(r"!", " ! ", text)
-    text = re.sub(r"\/", " ", text)
-    text = re.sub(r"\^", " ^ ", text)
-    text = re.sub(r"\+", " + ", text)
-    text = re.sub(r"\-", " - ", text)
-    text = re.sub(r"\=", " = ", text)
-    text = re.sub(r"'", " ", text)
-    text = re.sub(r"60k", " 60000 ", text)
-    text = re.sub(r":", " : ", text)
-    text = re.sub(r" e g ", " eg ", text)
-    text = re.sub(r" b g ", " bg ", text)
-    text = re.sub(r" u s ", " american ", text)
-    text = re.sub(r"\0s", "0", text)
-    text = re.sub(r" 9 11 ", "911", text)
-    text = re.sub(r"e -mail", "email", text)
-    text = re.sub(r"j k", "jk", text)
-    text = re.sub(r"\s{2,}", " ", text)
-    
-    #optionally, shorten words to their stems
-    if stem_words:
-        text = text.split()
-        stemmer = SnowballStemmer('english')
-        stemmed_words = [stemmer.stem(word) for word in text]
-        text = " ".join(stemmed_words)
-        
-    #return a list of words
-    return (text)
 
 ## read train data
 texts_1 = []
@@ -118,6 +78,7 @@ with codecs.open(TRAIN_DATA_FILE, encoding = 'utf-8') as f:
         texts_2.append(text_to_wordlist(values[4]))
         labels.append(int(values[5]))
 print('Found %s texts in train.csv' % len(texts_1))
+
 
 ## read test data
 t1 = time.time()
@@ -137,7 +98,7 @@ print("load data use %ss" % (t2 - t1))
 
 ## transfer words to sequences
 t1 = time.time()
-tokenizer = Tokenizer(num_words=MAX_NB_WORDS)
+tokenizer = Tokenizer(num_words=SET_NB_WORDS)
 tokenizer.fit_on_texts(texts_1 + texts_2 + test_texts_1 + test_texts_2)
 sequences_1 = tokenizer.texts_to_sequences(texts_1)
 sequences_2 = tokenizer.texts_to_sequences(texts_2)
@@ -150,6 +111,7 @@ word_index = tokenizer.word_index
 print('Foud %s unique tokens' % len(word_index))
 t2 = time.time()
 print('transfer words to sequences use %ss' % (t2 - t1))
+
 
 ##unify the sequences length to MAX_SEQUENCE_LENGTH
 data_1 = pad_sequences(sequences_1, maxlen = MAX_SEQUENCE_LENGTH)
@@ -250,13 +212,13 @@ print(STAMP)
 
 early_stopping = EarlyStopping(monitor = 'val_loss', patience = 3)
 bst_model_path = STAMP + '.h5'
-model_checkpoint = ModelCheckpoint(bst_model_path, save_best_only = True, save_weights_only = True)
+model_checkpoint = ModelCheckpoint(bst_model_path, verbose=0, monitor = 'val_acc', save_best_only = True, save_weights_only = False, mode = 'max')
 
 hist = model.fit([data_1_train, data_2_train], labels_train, \
         validation_data = ([data_1_val, data_2_val], labels_val, weight_val), \
-        epochs = 200, batch_size = 2048, shuffle = True, \
-        class_weight = class_weight, callbacks = [early_stopping, model_checkpoint])
-
+        epochs = EPOCHS, batch_size = BATCH_SIZE, shuffle = True, \
+        class_weight = class_weight, callbacks = [model_checkpoint])
+#model.save_weights(bst_model_path)
 model.load_weights(bst_model_path)
 bst_val_score = min(hist.history['val_loss'])
 print("best_val_score:", bst_val_score)
