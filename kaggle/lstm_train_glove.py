@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-word2vec
+GloVe
 
 Created on Wed Apr 19 14:33:46 2017
 @author: hzxieshukun
@@ -35,32 +35,32 @@ from util import text_to_wordlist
 
 ##set directories and parameters
 BASE_DIR = 'data/'
-EMBEDDING_FILE = BASE_DIR + 'GoogleNews-vectors-negative300.bin'
+EMBEDDING_FILE = BASE_DIR + 'glove.6B/glove.6B.100d.txt'
 TRAIN_DATA_FILE = BASE_DIR + 'train.csv'
 TEST_DATA_FILE = BASE_DIR + 'test.csv'
 MAX_SEQUENCE_LENGTH = 30
 MAX_NB_WORDS = 200000
-SET_NB_WORDS = 8000
-EMBEDDING_DIM = 300
+SET_NB_WORDS = 200000
+EMBEDDING_DIM = 100
 VALIDATION_SPLIT = 0.1
 EPOCHS = 2
-BATCH_SIZE = 1000
+BATCH_SIZE = 500
 
-num_lstm = np.random.randint(1, 5)
-num_dense = np.random.randint(1, 5)
-rate_drop_lstm = 0
-rate_drop_dense = 0
-#num_lstm = np.random.randint(175, 275)
-#num_dense = np.random.randint(100, 150)
-#rate_drop_lstm = 0.15 + np.random.rand() * 0.25
-#rate_drop_dense = 0.15 + np.random.rand() * 0.25
+#num_lstm = 5 #np.random.randint(5, 10)
+#num_dense = 5 #np.random.randint(5, 10)
+#rate_drop_lstm = 0
+#rate_drop_dense = 0
+num_lstm = np.random.randint(175, 275)
+num_dense = np.random.randint(100, 150)
+rate_drop_lstm = 0.15 + np.random.rand() * 0.25
+rate_drop_dense = 0.15 + np.random.rand() * 0.25
 
 act = 'relu'
 
 # whether to re-weight classes to fit the 17.5% share in test set
 re_weight = True
 
-STAMP = 'lstm_%d_%d_%.2f_%.2f' % (num_lstm, num_dense, rate_drop_lstm, rate_drop_dense)
+STAMP = 'lstm_%d_%d_%.2f_%.2f_glove' % (num_lstm, num_dense, rate_drop_lstm, rate_drop_dense)
 
 
 
@@ -68,9 +68,11 @@ STAMP = 'lstm_%d_%d_%.2f_%.2f' % (num_lstm, num_dense, rate_drop_lstm, rate_drop
 print('Processing text dataset')
 
 ## read train data
+t1 = time.time()
 texts_1 = []
 texts_2 = []
 labels = []
+line_num = 0
 with codecs.open(TRAIN_DATA_FILE, encoding = 'utf-8') as f:
     reader = csv.reader(f, delimiter = ',')
     header = next(reader)
@@ -78,8 +80,12 @@ with codecs.open(TRAIN_DATA_FILE, encoding = 'utf-8') as f:
         texts_1.append(text_to_wordlist(values[3]))
         texts_2.append(text_to_wordlist(values[4]))
         labels.append(int(values[5]))
+        line_num += 1
+        #if line_num > 10000:
+        #    break
 print('Found %s texts in train.csv' % len(texts_1))
-
+t2 = time.time()
+print("load train data use %ss" % (t2 - t1))
 
 ## read test data
 t1 = time.time()
@@ -95,11 +101,12 @@ with codecs.open(TEST_DATA_FILE, encoding = 'utf-8') as f:
         test_ids.append(values[0])
 print('Found %s texts in test.csv' % len(test_texts_1))
 t2 = time.time()
-print("load data use %ss" % (t2 - t1))
+print("load test data use %ss" % (t2 - t1))
 
 ## transfer words to sequences
 t1 = time.time()
 tokenizer = Tokenizer(num_words=SET_NB_WORDS)
+#tokenizer.fit_on_texts(texts_1 + texts_2)
 tokenizer.fit_on_texts(texts_1 + texts_2 + test_texts_1 + test_texts_2)
 sequences_1 = tokenizer.texts_to_sequences(texts_1)
 sequences_2 = tokenizer.texts_to_sequences(texts_2)
@@ -129,8 +136,15 @@ print("Shape of label tensor:", labels.shape)
 ##index word vectors
 t1 = time.time()
 print("Indexing word vectors")
-word2vec = KeyedVectors.load_word2vec_format(EMBEDDING_FILE, binary = True)
-print('Found %s word vectors of word2vec' % len(word2vec.vocab))
+embeddings_index = {}
+f = open(EMBEDDING_FILE)
+for line in f:
+    values = line.split()
+    word = values[0]
+    coefs = np.asarray(values[1:], dtype = 'float32')
+    embeddings_index[word] = coefs
+f.close()
+print('Found %s word vectors of glove.6B' % len(embeddings_index))
 t2 = time.time()
 print('index word vectors init use %ss' % (t2 - t1))
 
@@ -140,8 +154,9 @@ t1 = time.time()
 nb_words = min(MAX_NB_WORDS, len(word_index)) + 1
 embedding_matrix = np.zeros((nb_words, EMBEDDING_DIM))
 for word, i in word_index.items():
-    if word in word2vec.vocab:
-        embedding_matrix[i] = word2vec.word_vec(word)
+    embedding_vector = embeddings_index.get(word)
+    if embedding_vector is not None:
+        embedding_matrix[i] = embedding_vector
 print('Null word embddings: %d' % np.sum(np.sum(embedding_matrix, axis = 1) == 0))
 t2 = time.time()
 print("prepare embeddings use %ss" % (t2 -t1))
@@ -212,16 +227,23 @@ model.compile(loss = 'binary_crossentropy',
 print(STAMP)
 
 early_stopping = EarlyStopping(monitor = 'val_loss', patience = 3)
-bst_model_path = STAMP + '.h5'
+bst_model_path = 'model/' + STAMP + '.h5'
 model_checkpoint = ModelCheckpoint(bst_model_path, verbose=0, monitor = 'val_acc', save_best_only = True, save_weights_only = False, mode = 'max')
 
+t1 = time.time()
 hist = model.fit([data_1_train, data_2_train], labels_train, \
         validation_data = ([data_1_val, data_2_val], labels_val, weight_val), \
         epochs = EPOCHS, batch_size = BATCH_SIZE, shuffle = True, \
         class_weight = class_weight, callbacks = [model_checkpoint])
 #model.save_weights(bst_model_path)
 #model.load_weights(bst_model_path)
+t2 = time.time()
+print("lstm run use %s" % (t2 - t1))
 bst_val_score = min(hist.history['val_loss'])
 bst_val_acc = max(hist.history['val_acc'])
 print("best_val_score:", bst_val_score)
 print("baset_val_acc:", bst_val_acc)
+print("SET_NB_WORDS\tEMBEDDING_DIM\tEPOCHS\tBATCH_SIZE\tnum_lstm\tnum_dense\t\
+      rate_drop_lstm\trate_drop_dense\tVal_loss\tval_acc")
+print("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (SET_NB_WORDS, EMBEDDING_DIM, EPOCHS, BATCH_SIZE, num_lstm, num_dense, \
+        rate_drop_lstm, rate_drop_dense, bst_val_score, bst_val_acc))

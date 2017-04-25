@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Created on Fri Apr 21 16:55:41 2017
-
 @author: hzxieshukun
 """
 
@@ -10,6 +9,7 @@ import codecs
 import numpy as np
 import pandas as pd
 import time
+import sys
 
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
@@ -20,12 +20,14 @@ from util import text_to_wordlist
 BASE_DIR = 'data/'
 TRAIN_DATA_FILE = BASE_DIR + 'train.csv'
 TEST_DATA_FILE = BASE_DIR + 'test.csv'
-MODEL_VERSION = 'lstm_1_1_0.00_0.00.h5'
+MODEL_VERSION = 'model/lstm_273_141_0.21_0.31_glove.h5'
+if len(sys.args) == 1:
+    MODEL_VERSION = sys.args[1]
 MODEL_FILE = MODEL_VERSION
 MAX_SEQUENCE_LENGTH = 30
 MAX_NB_WORDS = 200000
-SET_NB_WORDS = 8000
-EMBEDDING_DIM = 300
+SET_NB_WORDS = 200000
+EMBEDDING_DIM = 100
 
 print("start to predict")
 ## read train data
@@ -76,12 +78,15 @@ t2 = time.time()
 print("unify the sequences length to MAX_SEQUENCE_LENGTH use %ss" % (t2 - t1))
 
 #load model
+t1 = time.time()
 model = load_model(MODEL_FILE)
 
 ##making submission
 print('Start making the submission before fine-tuning')
-preds = model.predict([test_data_1, test_data_2], batch_size=8192, verbose=1)
-preds += model.predict([test_data_2, test_data_1], batch_size=8192, verbose=1)
+preds = model.predict([test_data_1, test_data_2], batch_size=1000, verbose=1)
+preds += model.predict([test_data_2, test_data_1], batch_size=1000, verbose=1)
 preds /= 2
 submission = pd.DataFrame({'test_id':test_ids, 'is_duplicate':preds.ravel()})
 submission.to_csv(MODEL_VERSION+'_submission.csv', index=False)
+t2 = time.time()
+print("done. predict use %ss" % (t2 -t1))
